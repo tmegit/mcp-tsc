@@ -1,12 +1,21 @@
+# ❌ Secrets / keys accidentels
+*.pem
+*.key
+*.pub
+.env
+.env.*
+.venv/
+
 # Python
 __pycache__/
 *.pyc
 
-# Virtualenv
-.venv/
-
-# Env vars
-.env
-
 # OS
 .DS_Store
+
+# Python venv
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
