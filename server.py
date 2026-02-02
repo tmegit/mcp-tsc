@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 
 from mcp.server.fastmcp import FastMCP
 
+# TODO: add @require_valid_inputs decorator when exposing MCP to external agents / public traffic
 
 # -----------------------------
 # MCP init
