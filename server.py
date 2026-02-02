@@ -1,14 +1,14 @@
 import os
 import re
-import functools
-from typing import Any, Dict, List, Optional, Callable, Iterable, Tuple
+from functools import wraps
+from inspect import signature
+from typing import Any, Dict, List, Optional
 
 import psycopg
 from psycopg.rows import dict_row
 
 from mcp.server.fastmcp import FastMCP
 
-# TODO: add @require_valid_inputs decorator when exposing MCP to external agents / public traffic
 
 # -----------------------------
 # MCP init
@@ -40,7 +40,7 @@ def _fetch_one(sql: str, params: Optional[dict] = None) -> Dict[str, Any]:
 
 
 # -----------------------------
-# Normalization helpers
+# Normalization
 # -----------------------------
 def _norm_code(x: str) -> str:
     return (x or "").strip().upper()
@@ -55,9 +55,10 @@ def _norm_sector(x: str) -> str:
 
 
 # -----------------------------
-# Validators
+# Validation helpers (DB-backed)
 # -----------------------------
-ISO3_RE = re.compile(r"^[A-Z]{3}$")
+_ISO3_RE = re.compile(r"^[A-Z]{3}$")
+_SECTOR_RE = re.compile(r"^[A-Z]\d{2}$")  # ex: C26, C20
 
 
 def _validate_country(code: str, *, allow_out: bool = True) -> None:
@@ -68,6 +69,11 @@ def _validate_country(code: str, *, allow_out: bool = True) -> None:
     c = _norm_country(code)
     if allow_out and c == "OUT":
         return
+
+    if not _ISO3_RE.match(c):
+        raise ValueError(
+            f"buyer_country: invalid ISO3 code {code!r}. Expected 'FRA', 'DEU', 'CHN' (or 'OUT')."
+        )
 
     row = _fetch_one(
         """
@@ -86,6 +92,12 @@ def _validate_country(code: str, *, allow_out: bool = True) -> None:
 
 def _validate_sector(code: str) -> None:
     s = _norm_sector(code)
+
+    if not _SECTOR_RE.match(s):
+        raise ValueError(
+            f"Invalid sector code: {code!r}. Expected OCDE ICIO activity_code like 'C26', 'C20', etc."
+        )
+
     row = _fetch_one(
         """
         SELECT 1 AS ok
@@ -104,7 +116,6 @@ def _validate_sector(code: str) -> None:
 def _validate_year(y: int) -> None:
     if not isinstance(y, int):
         raise ValueError("year must be an integer")
-    # ICIO is typically 1995+ ; keep wide enough not to break future
     if y < 1995 or y > 2100:
         raise ValueError(f"year out of range: {y}")
 
@@ -124,139 +135,122 @@ def _validate_country_list(codes: List[str]) -> List[str]:
     out: List[str] = []
     for c in codes:
         cc = _norm_country(c)
-        if not ISO3_RE.match(cc):
-            raise ValueError(f"buyer_countries: invalid ISO3 code {c!r}")
         _validate_country(cc, allow_out=False)
         out.append(cc)
 
     # de-dup while preserving order
     seen = set()
-    dedup: List[str] = []
+    dedup = []
     for c in out:
         if c not in seen:
             seen.add(c)
             dedup.append(c)
-
     return dedup
 
 
+def _dsn_safe_summary(dsn: str) -> str:
+    """
+    Best-effort: log host/db/user without password.
+    Handles typical DSN: postgresql://user:pass@host:5432/dbname
+    """
+    m = re.match(r"^postgres(?:ql)?://([^:]+):[^@]+@([^:/]+)(?::(\d+))?/([^?]+)", dsn)
+    if not m:
+        return "PG_DSN set (details hidden)"
+    user, host, port, db = m.group(1), m.group(2), (m.group(3) or "5432"), m.group(4)
+    return f"PG_DSN set (user={user} host={host} port={port} db={db})"
+
+
+# Fail fast at import time
+_dsn = os.getenv("PG_DSN")
+if not _dsn:
+    raise RuntimeError("Missing env var PG_DSN (export PG_DSN=postgresql://...)")
+else:
+    print(_dsn_safe_summary(_dsn))
+
+
 # -----------------------------
-# "require_*" helpers used by decorator
+# Require-* helpers (for decorator)
 # -----------------------------
-def _require_iso3(code: str, field: str, *, allow_out: bool) -> str:
-    c = _norm_country(code)
-
-    if allow_out and c == "OUT":
-        return c
-
-    if not ISO3_RE.match(c):
-        raise ValueError(f"{field}: invalid ISO3 code {code!r}. Expected 'FRA', 'DEU', 'CHN' (or 'OUT').")
-
-    _validate_country(c, allow_out=allow_out)
-    return c
-
-
-def _require_sector(code: str, field: str) -> str:
-    s = _norm_sector(code)
-    _validate_sector(s)
-    return s
+def _require_iso3(x: str, field: str, *, allow_out: bool = True) -> str:
+    v = _norm_country(x)
+    # field-specific error msg
+    if allow_out and v == "OUT":
+        return v
+    if not _ISO3_RE.match(v):
+        raise ValueError(f"{field}: invalid ISO3 code {x!r}. Expected 'FRA', 'DEU', 'CHN' (or 'OUT').")
+    # DB validation
+    _validate_country(v, allow_out=allow_out)
+    return v
 
 
-def _require_year(y: int, field: str) -> int:
+def _require_sector(x: str, field: str) -> str:
+    v = _norm_sector(x)
+    _validate_sector(v)
+    return v
+
+
+def _require_year(y: int, field: str = "year") -> int:
     _validate_year(y)
     return y
 
 
-def _require_limit(n: int, field: str) -> int:
+def _require_limit(n: int, field: str = "limit") -> int:
+    # clamp to 200
     return _validate_limit(n)
 
 
-def _require_year_range(year_from: int, year_to: int) -> Tuple[int, int]:
-    y1 = _require_year(year_from, "year_from")
-    y2 = _require_year(year_to, "year_to")
-    if y1 > y2:
-        raise ValueError("year_from must be <= year_to")
-    return y1, y2
-
-
-def _require_iso3_list(codes: List[str], field: str) -> List[str]:
-    # reuse your existing list validator (norm + dedup + checks)
+def _require_country_list(codes: List[str], field: str = "buyer_countries") -> List[str]:
     return _validate_country_list(codes)
 
 
 # -----------------------------
-# Decorator: central input validation
+# Decorator: require_valid_inputs
 # -----------------------------
-def require_valid_inputs(
-    *,
-    iso3_fields: Iterable[str] = (),
-    iso3_fields_allow_out: Iterable[str] = (),
-    sector_fields: Iterable[str] = (),
-    year_fields: Iterable[str] = (),
-    limit_fields: Iterable[str] = (),
-    iso3_list_fields: Iterable[str] = (),
-    year_range: Optional[Tuple[str, str]] = None,
-) -> Callable:
+def require_valid_inputs(fn):
     """
-    Decorator to normalize & validate MCP tool arguments.
+    Validates and normalizes common tool inputs before execution.
 
-    Important: Use as:
-        @mcp.tool()
-        @require_valid_inputs(...)
-        def tool(...):
-            ...
+    CRITICAL: uses functools.wraps to preserve the original function name/signature,
+    otherwise FastMCP will register every tool as 'wrapper' (=> breaks tools).
     """
-    iso3_fields = tuple(iso3_fields)
-    iso3_fields_allow_out = tuple(iso3_fields_allow_out)
-    sector_fields = tuple(sector_fields)
-    year_fields = tuple(year_fields)
-    limit_fields = tuple(limit_fields)
-    iso3_list_fields = tuple(iso3_list_fields)
+    sig = signature(fn)
 
-    def _decorator(fn: Callable) -> Callable:
-        @functools.wraps(fn)
-        def _wrapped(*args, **kwargs):
-            # ISO3 strict (no OUT)
-            for f in iso3_fields:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_iso3(kwargs[f], f, allow_out=False)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        bound = sig.bind_partial(*args, **kwargs)
+        bound.apply_defaults()
+        a = bound.arguments
 
-            # ISO3 allow OUT
-            for f in iso3_fields_allow_out:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_iso3(kwargs[f], f, allow_out=True)
+        # Normalize/validate by param name
+        if "buyer_country" in a:
+            a["buyer_country"] = _require_iso3(a["buyer_country"], "buyer_country", allow_out=False)
 
-            # Sectors
-            for f in sector_fields:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_sector(kwargs[f], f)
+        if "supplier_country" in a:
+            # supplier_country may be OUT in your ICIO views
+            a["supplier_country"] = _require_iso3(a["supplier_country"], "supplier_country", allow_out=True)
 
-            # Years
-            for f in year_fields:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_year(kwargs[f], f)
+        if "buyer_sector" in a:
+            a["buyer_sector"] = _require_sector(a["buyer_sector"], "buyer_sector")
 
-            # Limits
-            for f in limit_fields:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_limit(kwargs[f], f)
+        if "buyer_countries" in a:
+            a["buyer_countries"] = _require_country_list(a["buyer_countries"], "buyer_countries")
 
-            # ISO3 lists
-            for f in iso3_list_fields:
-                if f in kwargs and kwargs[f] is not None:
-                    kwargs[f] = _require_iso3_list(kwargs[f], f)
+        if "year" in a:
+            a["year"] = _require_year(a["year"], "year")
 
-            # Year range
-            if year_range:
-                f_from, f_to = year_range
-                if f_from in kwargs and f_to in kwargs:
-                    kwargs[f_from], kwargs[f_to] = _require_year_range(kwargs[f_from], kwargs[f_to])
+        if "limit" in a:
+            a["limit"] = _require_limit(a["limit"], "limit")
 
-            return fn(*args, **kwargs)
+        if "year_from" in a:
+            a["year_from"] = _require_year(a["year_from"], "year_from")
+        if "year_to" in a:
+            a["year_to"] = _require_year(a["year_to"], "year_to")
+        if "year_from" in a and "year_to" in a and a["year_from"] > a["year_to"]:
+            raise ValueError("year_from must be <= year_to")
 
-        return _wrapped
+        return fn(**a)
 
-    return _decorator
+    return wrapper
 
 
 # -----------------------------
@@ -290,65 +284,11 @@ def db_info() -> dict:
         row["server_time"] = row["server_time"].isoformat()
     return row
 
-@mcp.tool()
-def meta() -> dict:
-    """
-    Metadata about the dataset, coverage and limitations.
-    Intended for LLM grounding and human users.
-    """
-    return {
-        "name": "Global Production Dependency Observatory",
-        "provider": "The Sov Company",
-        "source": "OECD ICIO (Inter-Country Input-Output tables)",
-        "coverage": {
-            "countries": "All OECD ICIO countries + Rest of World aggregate",
-            "sectors": "OECD ICIO activities (ISIC Rev.4 aligned)",
-            "years": "1995–2022 (depending on country/sector)"
-        },
-        "granularity": {
-            "geography": "Country-level (ISO3)",
-            "sector": "Economic activity (ICIO code)",
-            "firm_level": False
-        },
-        "indicators": [
-            "r0_dependency (share of foreign inputs by supplier country)"
-        ],
-        "limitations": [
-            "No firm-level data",
-            "No real-time trade flows",
-            "Dependencies are structural, not transactional",
-            "Rest of World (OUT) is an aggregate"
-        ],
-        "intended_use": [
-            "Macroeconomic analysis",
-            "Supply chain risk assessment",
-            "Strategic autonomy studies",
-            "AI-assisted economic reasoning"
-        ],
-        "last_updated": "2022",
-        "contact": "tmet@thesovcie.com"
-    }
 
 # -----------------------------
-# Dependency tools (product_dependency_*)
+# Core implementations
 # -----------------------------
-@mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    sector_fields=("buyer_sector",),
-    year_fields=("year",),
-    limit_fields=("limit",),
-)
-def product_dependency_top_suppliers(
-    buyer_country: str,
-    buyer_sector: str,
-    year: int = 2022,
-    limit: int = 10,
-) -> dict:
-    """
-    Top supplier countries for a given buyer country + sector + year.
-    Reads from: mcp.v_dep_sector_r0_mcp
-    """
+def _top_suppliers_impl(buyer_country: str, buyer_sector: str, year: int, limit: int) -> dict:
     rows = _fetch_all(
         """
         SELECT supplier_country, dependency_pct_str
@@ -378,23 +318,7 @@ def product_dependency_top_suppliers(
     }
 
 
-@mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_fields=("year",),
-    limit_fields=("limit",),
-)
-def product_dependency_top_sectors(
-    buyer_country: str,
-    supplier_country: str,
-    year: int = 2022,
-    limit: int = 10,
-) -> dict:
-    """
-    Top buyer sectors for a given buyer country importing from a supplier.
-    Reads from: mcp.v_dep_top_sectors_by_supplier_mcp
-    """
+def _top_sectors_impl(buyer_country: str, supplier_country: str, year: int, limit: int) -> dict:
     rows = _fetch_all(
         """
         SELECT buyer_sector, buyer_sector_label, dependency_pct_str
@@ -428,23 +352,7 @@ def product_dependency_top_sectors(
     }
 
 
-@mcp.tool()
-@require_valid_inputs(
-    iso3_list_fields=("buyer_countries",),
-    sector_fields=("buyer_sector",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_fields=("year",),
-)
-def product_dependency_compare_countries(
-    buyer_countries: list[str],
-    buyer_sector: str,
-    supplier_country: str,
-    year: int = 2022,
-) -> dict:
-    """
-    Compare dependency across multiple buyer countries for same sector + supplier.
-    Reads from: mcp.v_dep_compare_countries_mcp
-    """
+def _compare_countries_impl(buyer_countries: list[str], buyer_sector: str, supplier_country: str, year: int) -> dict:
     rows = _fetch_all(
         """
         SELECT buyer_country, buyer_country_name, dependency_pct_str
@@ -478,24 +386,13 @@ def product_dependency_compare_countries(
     }
 
 
-@mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    sector_fields=("buyer_sector",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_range=("year_from", "year_to"),
-)
-def product_dependency_time_series(
+def _time_series_impl(
     buyer_country: str,
     buyer_sector: str,
     supplier_country: str,
-    year_from: int = 2016,
-    year_to: int = 2022,
+    year_from: int,
+    year_to: int,
 ) -> dict:
-    """
-    Time series of dependency for buyer country + sector + supplier.
-    Reads from: mcp.v_dep_time_series_mcp
-    """
     rows = _fetch_all(
         """
         SELECT year, dependency_pct_str
@@ -524,15 +421,74 @@ def product_dependency_time_series(
 
 
 # -----------------------------
-# Aliases (sector_dependency_*)
+# Dependency tools (product_dependency_*)
 # -----------------------------
 @mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    sector_fields=("buyer_sector",),
-    year_fields=("year",),
-    limit_fields=("limit",),
-)
+@require_valid_inputs
+def product_dependency_top_suppliers(
+    buyer_country: str,
+    buyer_sector: str,
+    year: int = 2022,
+    limit: int = 10,
+) -> dict:
+    """
+    Top supplier countries for a given buyer country + sector + year.
+    Reads from: mcp.v_dep_sector_r0_mcp
+    """
+    return _top_suppliers_impl(buyer_country, buyer_sector, year, limit)
+
+
+@mcp.tool()
+@require_valid_inputs
+def product_dependency_top_sectors(
+    buyer_country: str,
+    supplier_country: str,
+    year: int = 2022,
+    limit: int = 10,
+) -> dict:
+    """
+    Top buyer sectors for a given buyer country importing from a supplier.
+    Reads from: mcp.v_dep_top_sectors_by_supplier_mcp
+    """
+    return _top_sectors_impl(buyer_country, supplier_country, year, limit)
+
+
+@mcp.tool()
+@require_valid_inputs
+def product_dependency_compare_countries(
+    buyer_countries: list[str],
+    buyer_sector: str,
+    supplier_country: str,
+    year: int = 2022,
+) -> dict:
+    """
+    Compare dependency across multiple buyer countries for same sector + supplier.
+    Reads from: mcp.v_dep_compare_countries_mcp
+    """
+    return _compare_countries_impl(buyer_countries, _norm_sector(buyer_sector), supplier_country, year)
+
+
+@mcp.tool()
+@require_valid_inputs
+def product_dependency_time_series(
+    buyer_country: str,
+    buyer_sector: str,
+    supplier_country: str,
+    year_from: int = 2016,
+    year_to: int = 2022,
+) -> dict:
+    """
+    Time series of dependency for buyer country + sector + supplier.
+    Reads from: mcp.v_dep_time_series_mcp
+    """
+    return _time_series_impl(buyer_country, _norm_sector(buyer_sector), supplier_country, year_from, year_to)
+
+
+# -----------------------------
+# Dependency tools (sector_dependency_* aliases)
+# -----------------------------
+@mcp.tool()
+@require_valid_inputs
 def sector_dependency_top_suppliers(
     buyer_country: str,
     buyer_sector: str,
@@ -540,16 +496,11 @@ def sector_dependency_top_suppliers(
     limit: int = 10,
 ) -> dict:
     """Alias of product_dependency_top_suppliers."""
-    return product_dependency_top_suppliers(buyer_country, buyer_sector, year, limit)
+    return _top_suppliers_impl(buyer_country, buyer_sector, year, limit)
 
 
 @mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_fields=("year",),
-    limit_fields=("limit",),
-)
+@require_valid_inputs
 def sector_dependency_top_sectors(
     buyer_country: str,
     supplier_country: str,
@@ -557,16 +508,11 @@ def sector_dependency_top_sectors(
     limit: int = 10,
 ) -> dict:
     """Alias of product_dependency_top_sectors."""
-    return product_dependency_top_sectors(buyer_country, supplier_country, year, limit)
+    return _top_sectors_impl(buyer_country, supplier_country, year, limit)
 
 
 @mcp.tool()
-@require_valid_inputs(
-    iso3_list_fields=("buyer_countries",),
-    sector_fields=("buyer_sector",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_fields=("year",),
-)
+@require_valid_inputs
 def sector_dependency_compare_countries(
     buyer_countries: list[str],
     buyer_sector: str,
@@ -574,16 +520,11 @@ def sector_dependency_compare_countries(
     year: int = 2022,
 ) -> dict:
     """Alias of product_dependency_compare_countries."""
-    return product_dependency_compare_countries(buyer_countries, buyer_sector, supplier_country, year)
+    return _compare_countries_impl(buyer_countries, _norm_sector(buyer_sector), supplier_country, year)
 
 
 @mcp.tool()
-@require_valid_inputs(
-    iso3_fields=("buyer_country",),
-    sector_fields=("buyer_sector",),
-    iso3_fields_allow_out=("supplier_country",),
-    year_range=("year_from", "year_to"),
-)
+@require_valid_inputs
 def sector_dependency_time_series(
     buyer_country: str,
     buyer_sector: str,
@@ -592,7 +533,7 @@ def sector_dependency_time_series(
     year_to: int = 2022,
 ) -> dict:
     """Alias of product_dependency_time_series."""
-    return product_dependency_time_series(buyer_country, buyer_sector, supplier_country, year_from, year_to)
+    return _time_series_impl(buyer_country, _norm_sector(buyer_sector), supplier_country, year_from, year_to)
 
 
 # -----------------------------
