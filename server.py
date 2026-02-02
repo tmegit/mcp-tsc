@@ -290,6 +290,44 @@ def db_info() -> dict:
         row["server_time"] = row["server_time"].isoformat()
     return row
 
+@mcp.tool()
+def meta() -> dict:
+    """
+    Metadata about the dataset, coverage and limitations.
+    Intended for LLM grounding and human users.
+    """
+    return {
+        "name": "Global Production Dependency Observatory",
+        "provider": "The Sov Company",
+        "source": "OECD ICIO (Inter-Country Input-Output tables)",
+        "coverage": {
+            "countries": "All OECD ICIO countries + Rest of World aggregate",
+            "sectors": "OECD ICIO activities (ISIC Rev.4 aligned)",
+            "years": "1995–2022 (depending on country/sector)"
+        },
+        "granularity": {
+            "geography": "Country-level (ISO3)",
+            "sector": "Economic activity (ICIO code)",
+            "firm_level": False
+        },
+        "indicators": [
+            "r0_dependency (share of foreign inputs by supplier country)"
+        ],
+        "limitations": [
+            "No firm-level data",
+            "No real-time trade flows",
+            "Dependencies are structural, not transactional",
+            "Rest of World (OUT) is an aggregate"
+        ],
+        "intended_use": [
+            "Macroeconomic analysis",
+            "Supply chain risk assessment",
+            "Strategic autonomy studies",
+            "AI-assisted economic reasoning"
+        ],
+        "last_updated": "2022",
+        "contact": "tmet@thesovcie.com"
+    }
 
 # -----------------------------
 # Dependency tools (product_dependency_*)
