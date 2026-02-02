@@ -3,7 +3,6 @@
 *.key
 *.pub
 .env
-.env.*
 .venv/
 
 # Python
@@ -18,4 +17,6 @@ __pycache__/
 __pycache__/
 *.pyc
 .env
-.env.*
+
+# env
+.env
