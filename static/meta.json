@@ -1,0 +1,75 @@
+{
+  "name": "The Sov Company MCP (OECD ICIO Dependencies)",
+  "slug": "mcp-thesov-icio",
+  "version": "1.0.0",
+  "updated_at": "2026-02-02",
+  "provider": {
+    "name": "The Sov Company",
+    "website": "https://thesov.company",
+    "contact": "support@thesov.company"
+  },
+  "description": "Public MCP endpoint exposing read-only dependency analytics backed by OECD ICIO-style input-output tables. Designed for LLM tooling and programmatic use via Streamable HTTP (SSE).",
+  "endpoint": {
+    "url": "https://mcp.thesov.company/mcp",
+    "protocol": "mcp",
+    "transport": "streamable_http",
+    "sse": true,
+    "http_version": "1.1",
+    "content_type": "application/json",
+    "accept": "application/json, text/event-stream"
+  },
+  "auth": {
+    "type": "none"
+  },
+  "limits": {
+    "rate_limit": "nginx-enforced",
+    "notes": "Requests may be rate-limited to protect service availability."
+  },
+  "capabilities": {
+    "tools_list": true,
+    "tools_call": true
+  },
+  "tools": [
+    {
+      "name": "product_dependency_top_suppliers",
+      "summary": "Top supplier countries for a buyer country + sector + year."
+    },
+    {
+      "name": "product_dependency_top_sectors",
+      "summary": "Top buyer sectors importing from a supplier for a given buyer country."
+    },
+    {
+      "name": "product_dependency_compare_countries",
+      "summary": "Compare dependency across multiple buyer countries for same sector + supplier."
+    },
+    {
+      "name": "product_dependency_time_series",
+      "summary": "Time series of dependency for buyer country + sector + supplier."
+    }
+  ],
+  "dataset": {
+    "source": "OECD ICIO-derived tables loaded in Postgres",
+    "granularity": {
+      "countries": "ISO3 + aggregates (e.g. OUT/ROW depending on dataset)",
+      "sectors": "OECD ICIO activity codes (e.g. C26, C20, ...)",
+      "years": "1995+ (varies by availability)"
+    },
+    "coverage_notes": [
+      "Not all country/sector/year combinations exist.",
+      "Aggregates like OUT/ROW may appear depending on the view."
+    ],
+    "limitations": [
+      "These are macro input-output estimates; not firm-level ground truth.",
+      "Interpret dependency_pct as share of buyer sector inputs attributable to supplier country for the chosen view."
+    ]
+  },
+  "links": {
+    "home": "https://mcp.thesov.company/",
+    "health": "https://mcp.thesov.company/health",
+    "meta": "https://mcp.thesov.company/meta.json"
+  },
+  "examples": {
+    "curl_tools_list": "curl --http1.1 -N https://mcp.thesov.company/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' --data-binary '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'",
+    "curl_call_health_db": "curl --http1.1 -N https://mcp.thesov.company/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' --data-binary '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"health_db\",\"arguments\":{}}}'"
+  }
+}
