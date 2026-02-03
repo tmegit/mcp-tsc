@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Sov Company — MCP</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;background:#0b0d12;color:#e8eefc}
+    .wrap{max-width:980px;margin:0 auto;padding:48px 20px}
+    h1{font-size:34px;margin:0 0 12px}
+    p{line-height:1.55;color:#c8d3f0}
+    code,pre{background:#101522;border:1px solid #1c2440;border-radius:10px}
+    code{padding:2px 6px}
+    pre{padding:14px 16px;overflow:auto}
+    a{color:#8fb3ff;text-decoration:none}
+    a:hover{text-decoration:underline}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:18px 0 24px}
+    .card{padding:14px 16px;background:#0f1422;border:1px solid #1c2440;border-radius:14px}
+    .k{color:#9fb3ff;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+    .v{margin-top:6px;font-size:14px}
+    .muted{color:#93a4d3;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>The Sov Company — MCP endpoint</h1>
+    <p>
+      Public MCP server exposing trade dependency tools backed by ICIO-derived views.
+      Use it from any MCP-capable client over HTTPS.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <div class="k">MCP endpoint</div>
+        <div class="v"><a href="/mcp">https://mcp.thesov.company/mcp</a></div>
+        <div class="muted">Streamable HTTP (SSE). Use HTTP/1.1.</div>
+      </div>
+      <div class="card">
+        <div class="k">Health</div>
+        <div class="v"><a href="/health">https://mcp.thesov.company/health</a></div>
+        <div class="muted">Simple liveness probe.</div>
+      </div>
+      <div class="card">
+        <div class="k">Metadata</div>
+        <div class="v"><a href="/meta.json">https://mcp.thesov.company/meta.json</a></div>
+        <div class="muted">Dataset coverage, limits, contact.</div>
+      </div>
+    </div>
+
+    <h2>Quick test</h2>
+    <pre><code>curl --http1.1 -N https://mcp.thesov.company/mcp \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</code></pre>
+
+    <h2>Example tool call</h2>
+    <pre><code>curl --http1.1 -N https://mcp.thesov.company/mcp \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"product_dependency_top_suppliers","arguments":{"buyer_country":"FRA","buyer_sector":"C26","year":2022,"limit":10}}}'</code></pre>
+
+    <p class="muted">
+      Notes: ISO3 countries (e.g. FRA, DEU) and ICIO activity codes (e.g. C26).
+      For details, see <a href="/meta.json">meta.json</a>.
+    </p>
+  </div>
+<section style="margin-top: 2rem; font-size: 0.95rem;">
+  <h3>🔎 MCP Discovery</h3>
+  <ul>
+    <li>
+      <a href="/mcp">MCP endpoint (JSON-RPC over HTTPS)</a>
+    </li>
+    <li>
+      <a href="/health">Health check</a>
+    </li>
+    <li>
+      <a href="/.well-known/mcp.json">MCP metadata (.well-known)</a>
+    </li>
+  </ul>
+</section>
+</body>
+</html>

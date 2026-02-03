@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://mcp.thesov.company/</loc></url>
+  <url><loc>https://mcp.thesov.company/meta.json</loc></url>
+  <url><loc>https://mcp.thesov.company/.well-known/mcp.json</loc></url>
+  <url><loc>https://mcp.thesov.company/health</loc></url>
+</urlset>

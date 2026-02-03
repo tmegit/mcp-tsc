@@ -1,0 +1,91 @@
+{
+  "name": "The Sov Company MCP (OECD ICIO Dependencies)",
+  "slug": "mcp-thesov-icio",
+  "version": "1.0.0",
+  "updated_at": "2026-02-02",
+  "provider": {
+    "name": "The Sov Company",
+    "website": "https://thesov.company",
+    "contact": "support@thesov.company"
+  },
+  "endpoints": {
+    "landing": "https://mcp.thesov.company/",
+    "mcp": "https://mcp.thesov.company/mcp",
+    "health": "https://mcp.thesov.company/health",
+    "meta": "https://mcp.thesov.company/meta.json",
+    "discovery": "https://mcp.thesov.company/.well-known/mcp.json"
+  },
+  "protocol": {
+    "type": "mcp",
+    "transport": "streamable-http",
+    "response": "text/event-stream"
+  },
+  "auth": {
+    "type": "none"
+  },
+  "rate_limits": {
+    "note": "Light nginx rate limiting may be enabled to protect availability.",
+    "recommended_client_backoff_ms": 250
+  },
+  "dataset": {
+    "title": "OECD ICIO-based dependency indicators (views exposed via Postgres)",
+    "coverage": {
+      "years": "1995–2022 (depends on OECD ICIO release & materialized views)",
+      "geography": "ISO3 countries + aggregates such as OUT/ROW (as provided by the dataset)",
+      "sectors": "OECD ICIO activity_code (e.g., C26, C20...)"
+    },
+    "limitations": [
+      "Aggregates such as OUT/ROW are dataset-level groupings.",
+      "Percentages are derived indicators; interpret as dependency shares for the selected cut."
+    ],
+    "disclaimer": "Provided for research/analysis. No warranty. Verify critical decisions with primary sources."
+  },
+  "tools": [
+    {
+      "name": "product_dependency_top_suppliers",
+      "description": "Top supplier countries for a buyer country + sector + year.",
+      "example": {
+        "method": "tools/call",
+        "params": {
+          "name": "product_dependency_top_suppliers",
+          "arguments": { "buyer_country": "FRA", "buyer_sector": "C26", "year": 2022, "limit": 10 }
+        }
+      }
+    },
+    {
+      "name": "product_dependency_top_sectors",
+      "description": "Top buyer sectors for a buyer country importing from a supplier + year.",
+      "example": {
+        "method": "tools/call",
+        "params": {
+          "name": "product_dependency_top_sectors",
+          "arguments": { "buyer_country": "FRA", "supplier_country": "CHN", "year": 2022, "limit": 10 }
+        }
+      }
+    },
+    {
+      "name": "product_dependency_compare_countries",
+      "description": "Compare dependency across multiple buyer countries for the same sector + supplier + year.",
+      "example": {
+        "method": "tools/call",
+        "params": {
+          "name": "product_dependency_compare_countries",
+          "arguments": { "buyer_countries": ["FRA", "DEU", "ITA"], "buyer_sector": "C26", "supplier_country": "CHN", "year": 2022 }
+        }
+      }
+    },
+    {
+      "name": "product_dependency_time_series",
+      "description": "Time series of dependency for buyer country + sector + supplier.",
+      "example": {
+        "method": "tools/call",
+        "params": {
+          "name": "product_dependency_time_series",
+          "arguments": { "buyer_country": "FRA", "buyer_sector": "C26", "supplier_country": "CHN", "year_from": 2016, "year_to": 2022 }
+        }
+      }
+    }
+  ],
+  "tags": ["mcp", "oecd", "icio", "supply-chain", "dependencies", "geoeconomics"],
+  "license": "proprietary"
+}

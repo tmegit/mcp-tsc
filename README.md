@@ -36,3 +36,9 @@ Call:
 ## Example prompt for LLM agents
 Use the tool product_dependency_top_suppliers to find France’s top supplier countries for sector C26 (Manufacture of computer, electronic, and optical products) in 2022.
 Then summarize the top 5 suppliers and explicitly explain what “OUT” means in the output.
+
+## Static endpoints (nginx)
+The landing page and metadata are served by nginx from `/var/www/mcp-static`.
+
+To update them from this repo:
+./deploy_static.sh
